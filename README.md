@@ -1,1 +1,469 @@
-.github-workflows-build.yml
+name: Build Cyborg Sniper APK
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Create App Structure
+        run: |
+          mkdir -p app/src/main/java/com/cyborg/sniper
+          mkdir -p app/src/main/res/values
+
+          # settings.gradle
+          cat << 'EOF' > settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "CyborgSniper"
+          include ':app'
+          EOF
+
+          # Root build.gradle
+          cat << 'EOF' > build.gradle
+          plugins {
+              id 'com.android.application' version '8.2.2' apply false
+          }
+          EOF
+
+          # app/build.gradle
+          cat << 'EOF' > app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.cyborg.sniper'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.cyborg.sniper"
+                  minSdk 26
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          # AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+
+              <application
+                  android:label="Cyborg Sniper"
+                  android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".CyborgService"
+                      android:foregroundServiceType="mediaProjection"
+                      android:exported="false" />
+              </application>
+          </manifest>
+          EOF
+
+          # strings.xml
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources>
+              <string name="app_name">Cyborg Sniper</string>
+          </resources>
+          EOF
+
+          # MainActivity.java
+          cat << 'EOF' > app/src/main/java/com/cyborg/sniper/MainActivity.java
+          package com.cyborg.sniper;
+
+          import android.app.Activity;
+          import android.content.Intent;
+          import android.media.projection.MediaProjectionManager;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.view.Gravity;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import android.widget.Toast;
+
+          public class MainActivity extends Activity {
+              private static final int REQ_OVERLAY = 1001;
+              private static final int REQ_PROJ = 1002;
+              private MediaProjectionManager mpm;
+
+              @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+
+                  LinearLayout layout = new LinearLayout(this);
+                  layout.setOrientation(LinearLayout.VERTICAL);
+                  layout.setBackgroundColor(0xFF090D16);
+                  layout.setGravity(Gravity.CENTER);
+                  layout.setPadding(30, 30, 30, 30);
+
+                  TextView title = new TextView(this);
+                  title.setText("⚡ CYBORG SNIPER OTC");
+                  title.setTextColor(0xFF00F0FF);
+                  title.setTextSize(20);
+                  title.setGravity(Gravity.CENTER);
+                  layout.addView(title);
+
+                  TextView desc = new TextView(this);
+                  desc.setText("\nFloating Target Box & Signal Scanner\n");
+                  desc.setTextColor(0xFF94A3B8);
+                  desc.setTextSize(12);
+                  desc.setGravity(Gravity.CENTER);
+                  layout.addView(desc);
+
+                  Button btnStart = new Button(this);
+                  btnStart.setText("START OVERLAY SCANNER");
+                  btnStart.setBackgroundColor(0xFF0284C7);
+                  btnStart.setTextColor(0xFFFFFFFF);
+                  btnStart.setPadding(20, 20, 20, 20);
+                  btnStart.setOnClickListener(v -> checkPermissions());
+                  layout.addView(btnStart);
+
+                  setContentView(layout);
+              }
+
+              private void checkPermissions() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                      Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+                      startActivityForResult(intent, REQ_OVERLAY);
+                  } else {
+                      startActivityForResult(mpm.createScreenCaptureIntent(), REQ_PROJ);
+                  }
+              }
+
+              @Override
+              protected void onActivityResult(int req, int res, Intent data) {
+                  if (req == REQ_OVERLAY) {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+                          startActivityForResult(mpm.createScreenCaptureIntent(), REQ_PROJ);
+                      } else {
+                          Toast.makeText(this, "Overlay permission zaroori hai!", Toast.LENGTH_SHORT).show();
+                      }
+                  } else if (req == REQ_PROJ && res == RESULT_OK && data != null) {
+                      Intent i = new Intent(this, CyborgService.class);
+                      i.putExtra("code", res);
+                      i.putExtra("data", data);
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          startForegroundService(i);
+                      } else {
+                          startService(i);
+                      }
+                      finish();
+                  }
+              }
+          }
+          EOF
+
+          # CyborgService.java
+          cat << 'EOF' > app/src/main/java/com/cyborg/sniper/CyborgService.java
+          package com.cyborg.sniper;
+
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.ServiceInfo;
+          import android.graphics.Color;
+          import android.graphics.PixelFormat;
+          import android.graphics.drawable.GradientDrawable;
+          import android.hardware.display.DisplayManager;
+          import android.hardware.display.VirtualDisplay;
+          import android.media.AudioManager;
+          import android.media.Image;
+          import android.media.ImageReader;
+          import android.media.ToneGenerator;
+          import android.media.projection.MediaProjection;
+          import android.media.projection.MediaProjectionManager;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.IBinder;
+          import android.os.Looper;
+          import android.os.Vibrator;
+          import android.util.DisplayMetrics;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import java.nio.ByteBuffer;
+
+          public class CyborgService extends Service {
+              private WindowManager wm;
+              private View targetBox;
+              private LinearLayout hudLayout;
+              private WindowManager.LayoutParams boxParams;
+              private WindowManager.LayoutParams hudParams;
+
+              private MediaProjection proj;
+              private VirtualDisplay virtDisplay;
+              private ImageReader imgReader;
+              private Handler loopHandler;
+              private Runnable loopRunnable;
+
+              private TextView tvSignal;
+              private TextView tvStats;
+              private ToneGenerator tone;
+              private Vibrator vib;
+              private long lastAlertTime = 0;
+
+              @Override
+              public IBinder onBind(Intent intent) { return null; }
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 100);
+                  vib = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+
+                  setupNotification();
+                  buildFloatingViews();
+              }
+
+              private void setupNotification() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel ch = new NotificationChannel("cyborg_scanner", "Cyborg Service", NotificationManager.IMPORTANCE_LOW);
+                      NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                      if (nm != null) nm.createNotificationChannel(ch);
+
+                      Notification n = new Notification.Builder(this, "cyborg_scanner")
+                              .setContentTitle("Cyborg Sniper Active")
+                              .setContentText("Scanning chart candles...")
+                              .setSmallIcon(android.R.drawable.ic_menu_camera)
+                              .build();
+
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                          startForeground(101, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+                      } else {
+                          startForeground(101, n);
+                      }
+                  }
+              }
+
+              private void buildFloatingViews() {
+                  int overlayType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
+                          WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
+                          WindowManager.LayoutParams.TYPE_PHONE;
+
+                  targetBox = new View(this);
+                  GradientDrawable boxBg = new GradientDrawable();
+                  boxBg.setColor(0x00000000);
+                  boxBg.setStroke(3, 0xFF00F0FF);
+                  targetBox.setBackground(boxBg);
+
+                  boxParams = new WindowManager.LayoutParams(
+                          130, 200,
+                          overlayType,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                          PixelFormat.TRANSLUCENT
+                  );
+                  boxParams.gravity = Gravity.TOP | Gravity.START;
+                  boxParams.x = 400;
+                  boxParams.y = 650;
+                  wm.addView(targetBox, boxParams);
+                  enableDrag(targetBox, boxParams);
+
+                  hudLayout = new LinearLayout(this);
+                  hudLayout.setOrientation(LinearLayout.VERTICAL);
+                  hudLayout.setPadding(20, 16, 20, 16);
+                  GradientDrawable hudBg = new GradientDrawable();
+                  hudBg.setColor(0xEE090D16);
+                  hudBg.setCornerRadius(14);
+                  hudBg.setStroke(2, 0xFF1E293B);
+                  hudLayout.setBackground(hudBg);
+
+                  TextView tvHeader = new TextView(this);
+                  tvHeader.setText("⚡ CYBORG SNIPER HUD");
+                  tvHeader.setTextColor(0xFF00F0FF);
+                  tvHeader.setTextSize(11);
+                  hudLayout.addView(tvHeader);
+
+                  tvSignal = new TextView(this);
+                  tvSignal.setText("MONITORING");
+                  tvSignal.setTextColor(0xFF94A3B8);
+                  tvSignal.setTextSize(18);
+                  tvSignal.setPadding(0, 6, 0, 4);
+                  hudLayout.addView(tvSignal);
+
+                  tvStats = new TextView(this);
+                  tvStats.setText("Drag box over active candle");
+                  tvStats.setTextColor(0xFF64748B);
+                  tvStats.setTextSize(10);
+                  hudLayout.addView(tvStats);
+
+                  Button btnClose = new Button(this);
+                  btnClose.setText("EXIT");
+                  btnClose.setTextSize(10);
+                  btnClose.setBackgroundColor(0xFF7F1D1D);
+                  btnClose.setTextColor(Color.WHITE);
+                  btnClose.setOnClickListener(v -> stopSelf());
+                  hudLayout.addView(btnClose);
+
+                  hudParams = new WindowManager.LayoutParams(
+                          340, WindowManager.LayoutParams.WRAP_CONTENT,
+                          overlayType,
+                          WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                          PixelFormat.TRANSLUCENT
+                  );
+                  hudParams.gravity = Gravity.TOP | Gravity.START;
+                  hudParams.x = 30;
+                  hudParams.y = 100;
+                  wm.addView(hudLayout, hudParams);
+                  enableDrag(hudLayout, hudParams);
+              }
+
+              private void enableDrag(final View view, final WindowManager.LayoutParams params) {
+                  view.setOnTouchListener(new View.OnTouchListener() {
+                      private int initX, initY;
+                      private float touchX, touchY;
+                      @Override
+                      public boolean onTouch(View v, MotionEvent e) {
+                          switch (e.getAction()) {
+                              case MotionEvent.ACTION_DOWN:
+                                  initX = params.x;
+                                  initY = params.y;
+                                  touchX = e.getRawX();
+                                  touchY = e.getRawY();
+                                  return true;
+                              case MotionEvent.ACTION_MOVE:
+                                  params.x = initX + (int) (e.getRawX() - touchX);
+                                  params.y = initY + (int) (e.getRawY() - touchY);
+                                  wm.updateViewLayout(view, params);
+                                  return true;
+                          }
+                          return false;
+                      }
+                  });
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  if (intent != null && proj == null) {
+                      int code = intent.getIntExtra("code", 0);
+                      Intent data = intent.getParcelableExtra("data");
+                      MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+                      if (mpm != null && data != null) {
+                          proj = mpm.getMediaProjection(code, data);
+                          startCapture();
+                      }
+                  }
+                  return START_NOT_STICKY;
+              }
+
+              private void startCapture() {
+                  DisplayMetrics dm = getResources().getDisplayMetrics();
+                  final int width = dm.widthPixels / 2;
+                  final int height = dm.heightPixels / 2;
+                  final int realW = dm.widthPixels;
+                  final int realH = dm.heightPixels;
+
+                  imgReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+                  virtDisplay = proj.createVirtualDisplay("CyborgCap", width, height, dm.densityDpi / 2,
+                          DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imgReader.getSurface(), null, null);
+
+                  loopHandler = new Handler(Looper.getMainLooper());
+                  loopRunnable = new Runnable() {
+                      @Override
+                      public void run() {
+                          analyzePixels(width, height, realW, realH);
+                          loopHandler.postDelayed(this, 300);
+                      }
+                  };
+                  loopHandler.postDelayed(loopRunnable, 500);
+              }
+
+              private void analyzePixels(int capW, int capH, int realW, int realH) {
+                  Image img = imgReader.acquireLatestImage();
+                  if (img == null) return;
+                  try {
+                      Image.Plane plane = img.getPlanes()[0];
+                      ByteBuffer buffer = plane.getBuffer();
+                      int pixelStride = plane.getPixelStride();
+                      int rowStride = plane.getRowStride();
+
+                      float scaleX = (float) capW / realW;
+                      float scaleY = (float) capH / realH;
+
+                      int startX = Math.max(0, (int) (boxParams.x * scaleX));
+                      int startY = Math.max(0, (int) (boxParams.y * scaleY));
+                      int endX = Math.min(capW, startX + (int) (boxParams.width * scaleX));
+                      int endY = Math.min(capH, startY + (int) (boxParams.height * scaleY));
+
+                      int greenPx = 0;
+                      int redPx = 0;
+
+                      for (int y = startY; y < endY; y += 3) {
+                          int rowOffset = y * rowStride;
+                          for (int x = startX; x < endX; x += 3) {
+                              int offset = rowOffset + (x * pixelStride);
+                              int r = buffer.get(offset) & 0xFF;
+                              int g = buffer.get(offset + 1) & 0xFF;
+                              int b = buffer.get(offset + 2) & 0xFF;
+
+                              if (g > 115 && g > r * 1.25 && g > b * 1.25) {
+                                  greenPx++;
+                              } else if (r > 125 && r > g * 1.3 && r > b * 1.3) {
+                                  redPx
